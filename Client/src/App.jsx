@@ -1,5 +1,5 @@
 import React from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthLayout, GuestLayout } from './pages/Layout'
 import Authpage from './pages/Authpage'
 import Homepage from './pages/Homepage'
@@ -12,8 +12,8 @@ const App = () => {
     <Routes>
       {/* Login Routes */}
       <Route element={<GuestLayout />}>
-        <Route path='/login' element={<Authpage moode="login" />} />
-        <Route path='/register' element={<Authpage moode="Register" />} />
+        <Route path='/login' element={<Authpage mode="login" />} />
+        <Route path='/register' element={<Authpage mode="Register" />} />
       </Route>
 
       {/* Protected Routes */}
@@ -24,6 +24,9 @@ const App = () => {
         
 
       </Route>
+
+      {/* catch all routes */}
+      <Route path='*' element={<Navigate to='/' />} />
     </Routes>
   )
 }
