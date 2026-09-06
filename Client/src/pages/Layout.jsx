@@ -1,8 +1,6 @@
-import React, { useContext } from 'react'
-import { Outlet ,Navigate} from 'react-router-dom'
+import React from 'react'
+import { Outlet, Navigate } from 'react-router-dom'
 import { useAppContext } from '../context/AppContext'
-import LoadingUser from '../Component/Loading';
-import lodingPage from '../Component/Loading';
 import Loading from '../Component/Loading';
 
 export function AuthLayout(){
@@ -14,7 +12,7 @@ export function AuthLayout(){
     }
 
     if(!user){
-        return <Navigae to = '/login' replace></Navigae>
+        return <Navigate to = '/login' replace></Navigate>
     }
 
     return <Outlet></Outlet>
@@ -22,14 +20,10 @@ export function AuthLayout(){
 }
 export function GuestLayout(){
 
-    const { user, loadingUSer } = useAppContext();
+    const { loadingUSer } = useAppContext();
 
     if(loadingUSer){
         return <Loading></Loading>
-    }
-
-    if(user){
-        return <Navigae to = '/' replace></Navigae>
     }
 
     return <Outlet></Outlet>
