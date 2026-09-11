@@ -5,10 +5,13 @@ import Authpage from './pages/Authpage'
 import Homepage from './pages/Homepage'
 import Builderpage from './pages/Builderpage'
 import Previewpage from './pages/Previewpage'
+import { Toaster } from 'react-hot-toast'
 
 
 const App = () => {
   return (
+    <>
+    <Toaster></Toaster>
     <Routes>
       {/* Login Routes */}
       <Route element={<GuestLayout />}>
@@ -28,6 +31,8 @@ const App = () => {
       {/* catch all routes */}
       <Route path='*' element={<Navigate to='/' />} />
     </Routes>
+    </>
+    
   )
 }
 
