@@ -117,7 +117,10 @@ export function AppContextProvider({ children }) {
     }, [user]);
 
     const loadProject = useCallback(async (id, silent = false) => {
-        if (!user) return;
+        if (!user) {
+            if (!silent) setLoadingActiveProjects(false);
+            return;
+        }
 
         if (!silent) setLoadingActiveProjects(true);
         try {
