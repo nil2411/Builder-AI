@@ -355,7 +355,7 @@ api.defaults.adapter = async (config) => {
         const id = url.split("/").pop();
         const projects = getProjects();
         const found = projects.find((p) => p._id === id);
-        if (found) {
+        if (found?.published) {
             responseData = found;
         } else {
             status = 404;

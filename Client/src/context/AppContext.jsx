@@ -117,7 +117,10 @@ export function AppContextProvider({ children }) {
     }, [user]);
 
     const loadProject = useCallback(async (id, silent = false) => {
-        if (!user) return;
+        if (!user) {
+            if (!silent) setLoadingActiveProjects(false);
+            return;
+        }
 
         if (!silent) setLoadingActiveProjects(true);
         try {
@@ -213,7 +216,7 @@ export function AppContextProvider({ children }) {
 
 
         try {
-            await api.deletel("/api/projects", { id });
+            await api.delete(`/api/projects/${id}`);
 
             setProjects((prev) => prev.filter((p) => p._id !== id));
 
@@ -285,7 +288,7 @@ export function AppContextProvider({ children }) {
 
     useEffect(() => {
         return() =>{
-            debouncedSave.cancel();
+            debouncedSave.flush();
         }
     },[debouncedSave])
 

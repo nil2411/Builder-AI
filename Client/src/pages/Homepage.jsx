@@ -13,7 +13,7 @@ import moment from 'moment'
 
 
 const Homepage = () => {
-  const naviagate = useNavigate();
+  const navigate = useNavigate();
   const {
     user,
     projects,
