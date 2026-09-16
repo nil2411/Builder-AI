@@ -3,7 +3,9 @@ export function detectDependencies(files) {
     const deps = {};
     if (!files) return deps;
 
-    const allCode = Object.values(files).join("\n");
+    const allCode = Object.values(files)
+        .map((content) => (typeof content === "string" ? content : content?.content || content?.code || ""))
+        .join("\n");
     const filePaths = Object.keys(files);
 
     const isLocalFileOrFolder = (pkgName) => {

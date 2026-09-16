@@ -1,7 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState,useMemo } from "react";
 import api from "../api/api";
 import toast from "react-hot-toast";
 import { Navigate, useNavigate } from "react-router-dom";
+import debounce from 'lodash.debounce'
 
 const AppContext = createContext(undefined);
 
@@ -115,14 +116,19 @@ export function AppContextProvider({ children }) {
         }
     }, [user]);
 
-    const loadProject = async (id, silent = false) => {
+    const loadProject = useCallback(async (id, silent = false) => {
         if (!user) return;
 
-        if (!silent) setLoadingProject(true);
+        if (!silent) setLoadingActiveProjects(true);
         try {
 
             const { data } = await api.get(`/api/projects/${id}`);
-            setActiveProjects(data);
+            setActiveProjects((prev) => {
+                if (prev && prev.status === data.status && prev.version === data.version) {
+                    return prev;
+                }
+                return data;
+            });
 
 
             //Default file selection
@@ -139,7 +145,7 @@ export function AppContextProvider({ children }) {
             }
 
         } catch (error) {
-            console.error("Failed to load project", err);
+            console.error("Failed to load project", error);
             if (!silent) {
                 toast.error("Failed to load project details !");
                 navigate("/");
@@ -149,20 +155,20 @@ export function AppContextProvider({ children }) {
 
         }
         finally {
-            if (!silent) setLoadingProject(false);
+            if (!silent) setLoadingActiveProjects(false);
 
 
         }
 
 
-    }
+    }, [user, navigate]);
 
     //Automatically poll active project status if generating or pending;
 
     useEffect(() => {
         if (!activeprojects?._id || !user) return;
 
-        const isonging = activeprojects.status === "Generating" || activeprojects.status === "Pending" || activeprojects.status === "Revising";
+        const ongoing = activeprojects.status === "Generating" || activeprojects.status === "Pending" || activeprojects.status === "Revising";
 
         if (ongoing) {
             setChatLoading(true);
@@ -189,7 +195,7 @@ export function AppContextProvider({ children }) {
 
         } catch (error) {
             console.error("Failed to generate project", error);
-            toast.error(err?.response?.data?.error || "Failed to generate projects !");
+            toast.error(error?.response?.data?.error || "Failed to generate projects !");
 
 
         }
@@ -230,6 +236,70 @@ export function AppContextProvider({ children }) {
 
     }, [user]);
 
+    const handleChat = useCallback(
+        async(prompt) =>{
+            if(!activeprojects || !user) return;
+            
+            setChatLoading(true);
+
+            try {
+                const {data} = await api.post(`/api/projects/${activeprojects._id}/chat`,{prompt});
+
+                setActiveProjects(data);
+
+                if(data.errors && data.errors.length > 0){
+                    toast.error(`${data.erros.length} revision  patch(es) failed`);
+
+
+                }
+                else{
+                    toast.success(`updated to version ${data.version}`);
+                }
+            } catch (error) {
+
+                console.error("Revision request failed : ",error);
+
+                
+            }
+            finally{
+                setChatLoading(false);
+            }
+
+        },[activeprojects,user]
+    )
+
+    const debouncedSave = useMemo(
+        () => debounce(async(files,id) =>{
+            try {
+                await api.put(`/api/projects/${id}/files`,{files});
+                
+            } catch (error) {
+                console.error("failed to auto-save files", error);
+                toast.error("Failed to save code modificatons");
+                
+                
+            }
+
+        },1000),[],
+    )
+
+    useEffect(() => {
+        return() =>{
+            debouncedSave.cancel();
+        }
+    },[debouncedSave])
+
+    const updateProjectFiles = useCallback(
+        async(files) =>{
+            if(!activeprojects || !user)return;
+
+            debouncedSave(files, activeprojects._id);
+
+
+
+        },[activeprojects,user,debouncedSave]
+    )
+
 
     return (
         <AppContext.Provider value={{
@@ -253,6 +323,8 @@ export function AppContextProvider({ children }) {
             handleGenerate,
             handleDelete,
             setProjects,
+            handleChat,
+            updateProjectFiles
            
         }}>
 
