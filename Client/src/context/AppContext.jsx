@@ -213,7 +213,7 @@ export function AppContextProvider({ children }) {
 
 
         try {
-            await api.deletel("/api/projects", { id });
+            await api.delete(`/api/projects/${id}`);
 
             setProjects((prev) => prev.filter((p) => p._id !== id));
 
@@ -285,7 +285,7 @@ export function AppContextProvider({ children }) {
 
     useEffect(() => {
         return() =>{
-            debouncedSave.cancel();
+            debouncedSave.flush();
         }
     },[debouncedSave])
 
