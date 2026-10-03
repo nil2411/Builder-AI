@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 import { useParams } from 'react-router-dom'
 import Loading from '../Component/Loading';
 import {AlertCircleIcon} from "lucide-react"
@@ -10,16 +10,12 @@ const Publishpage = () => {
   const { id } = useParams();
   const [project, setProject] = useState(null);
 
-  const [loading, setloading] = useState(true);
+  const [loading, setloading] = useState(Boolean(id));
 
-  const [error, setError] = useState("");
+  const [error, setError] = useState(id ? "" : "This website is not available or it is not published yet!");
 
   useEffect(() => {
-    if (!id) {
-      setError("This website is not available or it not published yet!");
-      setloading(false);
-      return;
-    }
+    if (!id) return;
 
     const fetchPublicProject = async () => {
       try {

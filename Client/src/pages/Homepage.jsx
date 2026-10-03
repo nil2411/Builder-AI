@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import { useEffect } from "react";
 import bgImg from '../public/bg-img.png'
 import logo from '../public/logo.svg'
 import { useAppContext } from '../context/AppContext'
@@ -44,9 +44,21 @@ const Homepage = () => {
         </div>
 
         <div className='flex items-center gap-4 text-sm font-medium text-zinc-300'>
-          <span>{user?.name}</span>
-          <button onClick={logout} className='py-1.5 px-3 border border-white/20 text-white hover:bg-white/10 text-xs rounded-md cursor-pointer bg-transparent'>Sign out</button>
-
+          {user ? (
+            <>
+              <span>{user.name}</span>
+              <button onClick={logout} className='py-1.5 px-3 border border-white/20 text-white hover:bg-white/10 text-xs rounded-md cursor-pointer bg-transparent'>
+                Sign out
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => navigate('/login')}
+              className='py-1.5 px-3 border border-white/20 text-white hover:bg-white/10 text-xs rounded-md cursor-pointer bg-transparent'
+            >
+              Sign in
+            </button>
+          )}
         </div>
       </nav>
 
@@ -136,11 +148,14 @@ const Homepage = () => {
 
                         <div className='flex items-center gap-2'>
                           <button
+                            type="button"
+                            aria-label={`Delete ${p.name}`}
+                            title="Delete project"
                             onClick={e => {
                               e.stopPropagation();
                               handleDelete(p._id);
                             }}
-                            className="p-1.5 rounded-md text-zinc-200 hover:text-red-400 hover:bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="shrink-0 p-1.5 rounded-md text-white/90 hover:text-white hover:bg-black/25 transition-colors cursor-pointer"
                           >
                             <Trash2Icon size={14} />
                           </button>

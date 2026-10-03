@@ -1,6 +1,6 @@
-import { CheckCircle2Icon, CircleIcon, Loader2Icon } from "lucide-react";
+import { CheckCircle2Icon, CircleIcon, Loader2Icon, RotateCcwIcon } from "lucide-react";
 
-export default function AgentProgressDashboard({ project }) {
+export default function AgentProgressDashboard({ project, onRetry, retrying = false }) {
     const planned = project.filesPlanned || [];
     const completed = project.filesGenerated || [];
     const current = project.currentFile;
@@ -25,9 +25,21 @@ export default function AgentProgressDashboard({ project }) {
                     </div>
                 </div>
 
-                {isFailed && project.error && (
-                    <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-lg text-sm text-red-700 font-medium">
-                        Error: {project.error}
+                {isFailed && (
+                    <div className="mb-6 rounded-lg border border-red-100 bg-red-50 p-4">
+                        {project.error && (
+                            <p className="text-sm font-medium text-red-700">Error: {project.error}</p>
+                        )}
+                        <button
+                            type="button"
+                            onClick={onRetry}
+                            disabled={!onRetry || retrying}
+                            className="mt-4 inline-flex items-center gap-2 rounded-md bg-zinc-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {retrying ? <Loader2Icon size={14} className="animate-spin" /> : <RotateCcwIcon size={14} />}
+                            {retrying ? "Restarting..." : "Retry generation"}
+                        </button>
+                        <p className="mt-2 text-xs text-red-600">This starts a fresh build using your original request.</p>
                     </div>
                 )}
 

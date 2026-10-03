@@ -3,12 +3,17 @@
 
 // Void HTML elements that must be self-closed in JSX
 const VOID_ELEMENTS = ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"];
+const MISSING_IMAGE_PLACEHOLDER = "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22120%22%20height%3D%2280%22%20viewBox%3D%220%200%20120%2080%22%3E%3Crect%20width%3D%22120%22%20height%3D%2280%22%20rx%3D%2212%22%20fill%3D%22%23e2e8f0%22%2F%3E%3Cpath%20d%3D%22M25%2055l18-20%2013%2014%209-10%2030%2016H25z%22%20fill%3D%22%2394a3b8%22%2F%3E%3Ccircle%20cx%3D%2243%22%20cy%3D%2228%22%20r%3D%226%22%20fill%3D%22%23cbd5e1%22%2F%3E%3C%2Fsvg%3E";
 
 // Validate and auto-fix common AI-generated code issues
 export function validateAndFixCode(code, filePath, context) {
     const warnings = [];
     const isCSS = filePath.endsWith(".css");
     const isJS = filePath.endsWith(".js") || filePath.endsWith(".jsx");
+
+    // Whitespace before a markdown fence is harmless but prevents the anchored
+    // fence matcher below from removing it.
+    code = code.trim();
 
     // 1. Strip markdown code fences that some models wrap around code
     const fencePattern = /^```(?:jsx?|javascript|css|html|tsx?|react)?\s*\n([\s\S]*?)\n```\s*$/;
@@ -23,6 +28,12 @@ export function validateAndFixCode(code, filePath, context) {
     code = code.replace(/\n```\s*$/, "");
 
     if (isCSS) {
+        const hiddenSectionRule = /\s*section\s*\{\s*opacity\s*:\s*0\s*;\s*\}/gi;
+        if (hiddenSectionRule.test(code)) {
+            code = code.replace(hiddenSectionRule, "\n");
+            warnings.push(filePath + ": Removed global hidden section rule");
+        }
+
         // CSS-specific fixes — minimal, just trim and return
         return { code: code.trim() + "\n", warnings };
     }
@@ -33,6 +44,38 @@ export function validateAndFixCode(code, filePath, context) {
 
     // --- JS/JSX-specific fixes ---
 
+    // Some model responses replace the closing quote of a JSX string
+    // attribute with a backslash followed by a closing brace. That leaves JSX
+    // parsing inside a string and produces the Unicode escape parse error.
+    // Only repair this sequence inside an opening JSX tag, immediately before
+    // the tag closes or another attribute begins.
+    const escapedJsxAttributeQuoteRegex = /(<[A-Za-z][^>\n]*?\b[\w:-]+\s*=\s*)\\"/g;
+    if (escapedJsxAttributeQuoteRegex.test(code)) {
+        code = code.replace(escapedJsxAttributeQuoteRegex, "$1\"");
+        warnings.push(filePath + ": Repaired escaped JSX attribute quote");
+    }
+
+    const escapedJsxClosingAttributeQuoteRegex = /(<[A-Za-z][^>\n]*?\b[\w:-]+\s*=\s*"[^"\n]*)\\"(?=\s*(?:\/?>|[\w:-]+\s*=))/g;
+    if (escapedJsxClosingAttributeQuoteRegex.test(code)) {
+        code = code.replace(escapedJsxClosingAttributeQuoteRegex, "$1\"");
+        warnings.push(filePath + ": Repaired escaped JSX attribute closing quote");
+    }
+
+    const malformedTemplateAttributeRegex = /(<[A-Za-z][^>\n]*?\b[\w:-]+\s*=\s*\{[\x60][^>\n]*?)"\s*\}/g;
+    if (malformedTemplateAttributeRegex.test(code)) {
+        code = code.replace(malformedTemplateAttributeRegex, "$1\x60}");
+        warnings.push(filePath + ": Repaired malformed JSX template attribute");
+    }
+    const malformedJsxAttributeRegex = /(<[A-Za-z][^>\n]*?)\\}(?=\s*(?:\/?>|[\w:-]+\s*=))/g;
+    if (malformedJsxAttributeRegex.test(code)) {
+        code = code.replace(malformedJsxAttributeRegex, "$1\"");
+        warnings.push(filePath + ": Repaired malformed JSX attribute quote");
+    }
+    const malformedJsxTagCloseRegex = /(<[A-Za-z][^>\n]*?)\\>(?=\s*(?:\{|\/?>|[\w:-]+\s*=))/g;
+    if (malformedJsxTagCloseRegex.test(code)) {
+        code = code.replace(malformedJsxTagCloseRegex, "$1\">");
+        warnings.push(filePath + ": Repaired malformed JSX tag close");
+    }
     // 2. Fix `class=` → `className=` in JSX (but not inside strings or comments)
     // Match class= that appears inside JSX tags (after < and before >)
     const classFixRegex = /(<[a-zA-Z][^>]*?)\bclass=/g;
@@ -115,6 +158,17 @@ export function validateAndFixCode(code, filePath, context) {
         const fixResult = fixImportPaths(code, filePath, context.allPlannedFiles);
         code = fixResult.code;
         warnings.push(...fixResult.warnings);
+
+        const plannedPaths = new Set(context.allPlannedFiles.map((file) => {
+            const path = typeof file === "string" ? file : file?.path;
+            return path?.startsWith("/") ? path : "/" + path;
+        }).filter(Boolean));
+        const missingImageRegex = /(\bsrc\s*=\s*)(["'])(\/(?:[^"']+\.(?:png|jpe?g|gif|svg|webp|avif)))\2/gi;
+        code = code.replace(missingImageRegex, (match, prefix, quote, assetPath) => {
+            if (plannedPaths.has(assetPath)) return match;
+            warnings.push(filePath + ": Replaced unplanned local image '" + assetPath + "' with a preview-safe placeholder");
+            return prefix + quote + MISSING_IMAGE_PLACEHOLDER + quote;
+        });
     }
 
     return { code: code.trim() + "\n", warnings };
@@ -132,6 +186,31 @@ export function validateRevisionContent(content, filePath, op) {
     // For update ops (search/replace content), only apply safe fixes
     // that won't break the partial context
     const warnings = [];
+    const malformedJsxAttributeRegex = /(<[A-Za-z][^>\n]*?)\\}(?=\s*(?:\/?>|[\w:-]+\s*=))/g;
+    const escapedJsxAttributeQuoteRegex = /(<[A-Za-z][^>\n]*?\b[\w:-]+\s*=\s*)\\"/g;
+    if (escapedJsxAttributeQuoteRegex.test(content)) {
+        content = content.replace(escapedJsxAttributeQuoteRegex, "$1\"");
+        warnings.push(filePath + ": Repaired escaped JSX attribute quote in replacement");
+    }
+    const escapedJsxClosingAttributeQuoteRegex = /(<[A-Za-z][^>\n]*?\b[\w:-]+\s*=\s*"[^"\n]*)\\"(?=\s*(?:\/?>|[\w:-]+\s*=))/g;
+    if (escapedJsxClosingAttributeQuoteRegex.test(content)) {
+        content = content.replace(escapedJsxClosingAttributeQuoteRegex, "$1\"");
+        warnings.push(filePath + ": Repaired escaped JSX attribute closing quote in replacement");
+    }
+    const malformedTemplateAttributeRegex = /(<[A-Za-z][^>\n]*?\b[\w:-]+\s*=\s*\{[\x60][^>\n]*?)"\s*\}/g;
+    if (malformedTemplateAttributeRegex.test(content)) {
+        content = content.replace(malformedTemplateAttributeRegex, "$1\x60}");
+        warnings.push(filePath + ": Repaired malformed JSX template attribute in replacement");
+    }
+    if (malformedJsxAttributeRegex.test(content)) {
+        content = content.replace(malformedJsxAttributeRegex, "$1\"");
+        warnings.push(filePath + ": Repaired malformed JSX attribute quote in replacement");
+    }
+    const malformedJsxTagCloseRegex = /(<[A-Za-z][^>\n]*?)\\>(?=\s*(?:\{|\/?>|[\w:-]+\s*=))/g;
+    if (malformedJsxTagCloseRegex.test(content)) {
+        content = content.replace(malformedJsxTagCloseRegex, "$1\">");
+        warnings.push(filePath + ": Repaired malformed JSX tag close in replacement");
+    }
 
     // Fix class → className
     const classFixRegex = /(<[a-zA-Z][^>]*?)\bclass=/g;

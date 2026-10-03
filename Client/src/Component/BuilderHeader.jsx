@@ -1,4 +1,3 @@
-import React from 'react'
 import { ArrowLeftIcon, EyeIcon, Code2Icon, ExternalLinkIcon ,Loader2Icon ,GlobeIcon,DownloadIcon} from 'lucide-react'
 import logo from '../public/logo.svg'
 

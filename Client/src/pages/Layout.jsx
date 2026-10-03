@@ -1,4 +1,3 @@
-import React from 'react'
 import { Outlet, Navigate } from 'react-router-dom'
 import { useAppContext } from '../context/AppContext'
 import Loading from '../Component/Loading';

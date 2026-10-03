@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 import { useAppContext } from '../context/AppContext'
 import { useNavigate, useParams } from 'react-router-dom';
 import Loading from '../Component/Loading';
@@ -30,7 +30,7 @@ const Builderpage = () => {
     setShowCode,
     loadProject,
     logout,
-    chatloading,handleChat
+    chatloading, handleChat, handleRetry, retryingProject
   } = useAppContext();
 
   
@@ -163,7 +163,7 @@ const Builderpage = () => {
 
         <div className='flex-1 overflow-hidden'>
           {["pending", "generating", "failed"].includes((activeProject.status || "").toLowerCase()) ? (
-            <AgentProgressDashboard project={activeProject}/>
+            <AgentProgressDashboard project={activeProject} onRetry={handleRetry} retrying={retryingProject} />
           ):(
             <PreviewPanel project={activeProject} activeFile={activeFile} showCode={showCode}/>
           )}

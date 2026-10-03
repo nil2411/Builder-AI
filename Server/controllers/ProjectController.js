@@ -1,16 +1,44 @@
 import crypto from 'node:crypto';
+import mongoose from "mongoose";
 import { Project } from "../models/Project.js";
+import { generateProject } from "../services/ai.js";
+import { repairProjectFiles } from "../services/projectRepair.js";
 
-// (Assumes generateProject is imported elsewhere)
 
 function hashContent(content) {
     return crypto.createHash("md5").update(content).digest("hex").slice(0, 12);
+}
+function hasInvalidProjectId(req, res) {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+        res.status(400).json({ error: "Invalid project id" });
+        return true;
+    }
+    return false;
+}
+
+function toFilesObject(files = {}) {
+    return Object.fromEntries(
+        Object.entries(files).map(([path, entry]) => [
+            path,
+            typeof entry?.content === "string" ? entry.content : "",
+        ]),
+    );
+}
+
+function startGeneration(projectId, prompt) {
+    runBackgroundGeneration(projectId, prompt).catch((error) => {
+        console.error(`[Background AI] Fatal generation error for project ${projectId}:`, error);
+        Project.findByIdAndUpdate(projectId, {
+            status: "failed",
+            error: error.message || String(error),
+        }).catch(() => {});
+    });
 }
 
 // POST /api/projects
 // Create a new project from AI prompt 
 export async function createProject(req, res) {
-    const { prompt } = req.body;
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
 
     if (!prompt || typeof prompt !== "string") {
         res.status(400).json({ error: "Prompt is required" });
@@ -47,14 +75,7 @@ export async function createProject(req, res) {
     }
 
     // Start background generation
-    runBackgroundGeneration(project._id.toString(), prompt).catch((err) => {
-        console.error(`[Background AI] Fatal generation error for project ${project._id}:`, err);
-        // Optionally: Update project with the error
-        Project.findByIdAndUpdate(project._id, {
-            status: "error",
-            error: err.message || String(err)
-        }).catch(() => {});
-    });
+    startGeneration(project._id.toString(), prompt);
 
     res.status(201).json({
         id: project._id,
@@ -69,6 +90,72 @@ export async function createProject(req, res) {
         currentFile: project.currentFile,
         error: project.error,
         createdAt: project.createdAt,
+    });
+}
+
+// POST /api/projects/:id/retry
+// Start a clean generation attempt for a failed project using its original prompt.
+export async function retryProject(req, res) {
+    if (hasInvalidProjectId(req, res)) return;
+
+    if (!req.user) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+    }
+
+    const project = await Project.findOne({
+        _id: req.params.id,
+        owner: req.user.userId,
+    });
+
+    if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+    }
+
+    if (project.status !== "failed") {
+        res.status(409).json({ error: "Only failed projects can be retried" });
+        return;
+    }
+
+    const prompt = typeof project.description === "string" ? project.description.trim() : "";
+    if (!prompt) {
+        res.status(400).json({ error: "This project has no generation prompt to retry" });
+        return;
+    }
+
+    project.name = "Planning project ...";
+    project.files = {};
+    project.filesPlanned = [];
+    project.filesGenerated = [];
+    project.currentFile = null;
+    project.error = null;
+    project.status = "pending";
+    project.version = (project.version || 0) + 1;
+    project.messages.push({
+        role: "assistant",
+        content: "Retrying generation with the latest AI configuration...",
+        timestamp: new Date(),
+    });
+    project.markModified("files");
+    await project.save();
+
+    startGeneration(project._id.toString(), prompt);
+
+    res.status(202).json({
+        id: project._id,
+        name: project.name,
+        description: project.description,
+        files: {},
+        messages: project.messages,
+        version: project.version,
+        status: project.status,
+        filesPlanned: project.filesPlanned,
+        filesGenerated: project.filesGenerated,
+        currentFile: project.currentFile,
+        error: project.error,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
     });
 }
 
@@ -135,23 +222,36 @@ export async function runBackgroundGeneration(projectId, prompt) {
             onError: async (error) => {
                 console.error(`[Background AI] Error during generation for project ${projectId}:`, error);
                 await Project.findByIdAndUpdate(projectId, {
-                    status: "error",
+                    status: "failed",
                     error: error.message || String(error)
                 });
             },
 
-            onDone: async () => {
-                await Project.findByIdAndUpdate(projectId, {
-                    status: "completed",
-                    currentFile: null
-                });
+            onDone: async ({ files } = {}) => {
+                const project = await Project.findById(projectId);
+                if (project) {
+                    if (files && typeof files === "object") {
+                        project.files = Object.fromEntries(
+                            Object.entries(files).map(([path, content]) => [path, {
+                                content: typeof content === "string" ? content : "",
+                                hash: hashContent(typeof content === "string" ? content : ""),
+                            }]),
+                        );
+                        project.filesGenerated = Object.keys(project.files);
+                        project.markModified("files");
+                        project.markModified("filesGenerated");
+                    }
+                    project.status = "completed";
+                    project.currentFile = null;
+                    await project.save();
+                }
                 console.log(`[Background AI] Generation complete for project ${projectId}`);
             }
         });
     } catch (error) {
         console.error(`[Background AI] Fatal error for project ${projectId}:`, error);
         await Project.findByIdAndUpdate(projectId, {
-            status: "error",
+            status: "failed",
             error: error.message || String(error)
         });
     }
@@ -187,6 +287,8 @@ export async function listProjects(req, res) {
 
 //get full project details
 export async function getProject(req, res) {
+    if (hasInvalidProjectId(req, res)) return;
+
     if (!req.user) {
         res.status(401).json({ error: "Unauthorized" });
         return;
@@ -203,10 +305,7 @@ export async function getProject(req, res) {
         return;
     }
 
-    const filesObj = {};
-    for (const [path, entry] of Object.entries(project.files)) {
-        filesObj[path] = entry.content;
-    }
+    const filesObj = toFilesObject(project.files);
 
     res.json({
         id: project._id,
@@ -235,6 +334,8 @@ export async function getProject(req, res) {
 
 //Delete a project
 export async function deleteProject(req, res) {
+    if (hasInvalidProjectId(req, res)) return;
+
     if (!req.user) {
         res.status(401).json({ error: "Unauthorized" });
         return;
@@ -258,9 +359,11 @@ export async function deleteProject(req, res) {
 
 //Update project files (manual edits)
 export async function updateProjectFiles(req, res) {
+    if (hasInvalidProjectId(req, res)) return;
 
-    const { files } = req.body;
-    if (!files || typeof files !== 'object') {
+
+    const { files } = req.body ?? {};
+    if (!files || typeof files !== "object" || Array.isArray(files)) {
         res.status(400).json({ error: "files object is required" });
         return
 
@@ -278,28 +381,28 @@ export async function updateProjectFiles(req, res) {
         return;
     }
 
-    //Rebuild project files map with content & hashes   
+    // Normalize and repair the whole project before saving manual edits. This
+    // keeps JSX, imports, and styles consistent even when the editor receives
+    // code from an older generation.
+    const repairResult = repairProjectFiles(files);
+    const newFiles = Object.fromEntries(
+        Object.entries(repairResult.files).map(([path, content]) => [path, {
+            content,
+            hash: hashContent(content),
+        }]),
+    );
 
-    const newFiles = {};
-    for (const [path, content] of Object.entries(files)) {
-        if (typeof content === "string") {
-            newFiles[path] = {
-                content, hash: hashContent(content)
-            }
+    const previousFiles = toFilesObject(project.files);
+    const filePaths = new Set([...Object.keys(previousFiles), ...Object.keys(newFiles)]);
+    const filesChanged = [...filePaths].some((path) => previousFiles[path] !== newFiles[path]);
 
-        }
-
-
+    if (filesChanged) {
+        project.files = newFiles;
+        project.version = (project.version || 0) + 1;
+        project.markModified("files");
+        await project.save();
     }
-
-    project.files = newFiles;
-    project.version += 1;
-    await project.save();
-
-    const filesObj = {};
-    for (const [path, entry] of Object.entries(project.files)) {
-        filesObj[path] = entry.content;
-    }
+    const filesObj = toFilesObject(project.files);
 
     res.json({
         id: project._id,
@@ -323,6 +426,8 @@ export async function updateProjectFiles(req, res) {
 
 //Mark a project as publicly published
 export async function publishProject(req, res) {
+    if (hasInvalidProjectId(req, res)) return;
+
     if (!req.user) {
         res.status(401).json({ error: "Unauthorized" });
         return;
@@ -331,7 +436,7 @@ export async function publishProject(req, res) {
     const project = await Project.findOneAndUpdate(
         { _id: req.params.id, owner: req.user.userId },
         { published: true },
-        { returnDocument: "after" }
+        { new: true }
 
     )
 
@@ -349,6 +454,8 @@ export async function publishProject(req, res) {
 
 //Mark a project as publicly published details (without auth)
 export async function getPublicProject(req, res) {
+    if (hasInvalidProjectId(req, res)) return;
+
 
     const project = await Project.findById(req.params.id);
     if (!project) {
@@ -361,10 +468,7 @@ export async function getPublicProject(req, res) {
         return;
     }
 
-    const filesObj = {};
-    for (const [path, entry] of Object.entries(project.files)) {
-        filesObj[path] = entry.content;
-    }
+    const filesObj = toFilesObject(project.files);
 
     res.json({
         id: project._id,
