@@ -3,6 +3,14 @@ import { User } from "../models/user.js";
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET?.trim();
+const isProduction = process.env.NODE_ENV === "production" || Boolean(process.env.VERCEL);
+const sessionCookieOptions = {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+    path: "/",
+};
 
 // Helper to set cookie
 const setSessionCookie = (res, payload) => {
@@ -10,13 +18,7 @@ const setSessionCookie = (res, payload) => {
         throw new Error("JWT_SECRET is not configured");
     }
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
-    res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-        path: "/",
-    });
+    res.cookie("token", token, sessionCookieOptions);
 };
 
 export async function register(req, res) {
@@ -81,13 +83,7 @@ export async function login(req, res) {
 }
 
 export async function logout(req, res) {
-    res.cookie('token', '', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 0,
-        path: "/",
-    });
+    res.cookie("token", "", { ...sessionCookieOptions, maxAge: 0 });
     res.json({ success: true });
 }
 
