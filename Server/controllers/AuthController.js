@@ -1,10 +1,14 @@
+import "dotenv/config";
 import { User } from "../models/user.js";
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
+const JWT_SECRET = process.env.JWT_SECRET?.trim();
 
 // Helper to set cookie
 const setSessionCookie = (res, payload) => {
+    if (!JWT_SECRET) {
+        throw new Error("JWT_SECRET is not configured");
+    }
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "30d" });
     res.cookie('token', token, {
         httpOnly: true,
@@ -16,13 +20,14 @@ const setSessionCookie = (res, payload) => {
 };
 
 export async function register(req, res) {
-    const { name, email, password } = req.body;
+    const { name, email, password } = req.body ?? {};
 
-    if (!name || !email || !password) {
+    if ([name, email, password].some((value) => typeof value !== "string" || !value.trim())) {
         res.status(400).json({ error: "All fields are required" });
         return;
     }
 
+    const trimmedName = name.trim();
     const trimmedEmail = email.trim().toLowerCase();
     const existing = await User.findOne({ email: trimmedEmail });
 
@@ -31,7 +36,7 @@ export async function register(req, res) {
         return;
     }
 
-    const user = await User.create({ name, email: trimmedEmail, password });
+    const user = await User.create({ name: trimmedName, email: trimmedEmail, password });
 
     setSessionCookie(res, { userId: user._id.toString(), email: user.email });
 
@@ -45,9 +50,9 @@ export async function register(req, res) {
 }
 
 export async function login(req, res) {
-    const { email, password } = req.body;
+    const { email, password } = req.body ?? {};
 
-    if (!email || !password) {
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
         res.status(400).json({ error: "Email and password are required" });
         return;
     }

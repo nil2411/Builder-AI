@@ -1,24 +1,33 @@
+import mongoose from "mongoose";
+import crypto from "node:crypto";
 import { Project } from "../models/Project.js";
-import { reviseProject } from "../services/ai.js"
-// POST /api/projects/ : id/chat
-// Send a revision prompt and return updated project.
+import { reviseProject } from "../services/ai.js";
+import { applyOperations } from "../services/diff.js";
+import { repairProjectFiles } from "../services/projectRepair.js";
 
-export function buildManifest(files) {
-    const manifest = [];
-    for (const [path, entry] of Object.entries(files)) {
-        manifest.push({ path, hash: entry.hash, size: entry.content.length });
-    }
-    return manifest;
+// POST /api/projects/:id/chat
+// Send a revision prompt and return the updated project.
+function cryptoHash(content) {
+    return crypto.createHash("md5").update(content).digest("hex").slice(0, 12);
 }
 
+export function buildManifest(files = {}) {
+    return Object.entries(files).map(([path, entry]) => {
+        const content = typeof entry?.content === "string" ? entry.content : "";
+        return {
+            path,
+            hash: entry?.hash,
+            size: content.length,
+        };
+    });
+}
 
 export async function chat(req, res) {
-    const { prompt } = req.body;
+    const prompt = typeof req.body?.prompt === "string" ? req.body.prompt.trim() : "";
 
-    if (!prompt || typeof prompt !== "string") {
+    if (!prompt) {
         res.status(400).json({ error: "prompt is required" });
         return;
-
     }
 
     if (!req.user) {
@@ -26,10 +35,14 @@ export async function chat(req, res) {
         return;
     }
 
+    if (!mongoose.isValidObjectId(req.params.id)) {
+        res.status(400).json({ error: "Invalid project id" });
+        return;
+    }
 
     const project = await Project.findOne({
-        _id: req.params.id, owner: req.
-            user.userId
+        _id: req.params.id,
+        owner: req.user.userId,
     });
 
     if (!project) {
@@ -37,94 +50,92 @@ export async function chat(req, res) {
         return;
     }
 
-    // Set status to revising and save user prompt immediately
-    project.status = "revising",
-        project.messages.push({
-            role: "user", content: prompt, timestamp: new
-                Date()
-        });
+    project.files = project.files ?? {};
+    project.messages = project.messages ?? [];
+    project.status = "revising";
+    project.messages.push({
+        role: "user",
+        content: prompt,
+        timestamp: new Date(),
+    });
     await project.save();
 
     try {
-        // Build compact manifest (path + hash + size) instead of sending all code
         const manifest = buildManifest(project.files);
-
-        // Include ALL file contents so the AI can do accurate search/replace
-        const relevantFiles = {};
-        for (const [path, entry] of Object.entries(project.files)) {
-            relevantFiles[path] = entry.content;
-
-        }
-
-        // Recent messages for context (last 4 max)
-        const recentMessages = project.messages.slice(-4).map((m) => ({
-            role: m.role,
-            content: m.content,
-        }))
+        const relevantFiles = Object.fromEntries(
+            Object.entries(project.files).map(([path, entry]) => [
+                path,
+                typeof entry?.content === "string" ? entry.content : "",
+            ]),
+        );
+        const recentMessages = project.messages.slice(-4).map((message) => ({
+            role: message.role,
+            content: message.content,
+        }));
 
         console.log(
-            `[AI] Revising project ${project._id}: "${prompt.slice(0, 80)}..." ` +
-            `(${manifest.length} files, manifest ~${JSON.stringify(manifest).length} chars)`
+            "[AI] Revising project " + project._id + ': "' + prompt.slice(0, 80) + '..." ' +
+            "(" + manifest.length + " files, manifest ~" + JSON.stringify(manifest).length + " chars)",
         );
 
-        // Call AI with manifest + relevant files
         const result = await reviseProject(prompt, manifest, relevantFiles, recentMessages);
-
-        console.log(`[AI] Got ${result.operations.length} operations: ${result.description}`);
+        const operations = result.operations ?? [];
+        console.log("[AI] Got " + operations.length + " operations: " + result.description);
 
         const { files: updatedFiles, applied, errors } = applyOperations(
             project.files,
-            result.operations
+            operations,
         );
 
-        if (errors && errors.length > 0) {
+        if (errors.length > 0) {
             console.warn("[Diff] Errors applying operations:", errors);
         }
 
-        // Update project in DB
-        project.files = updatedFiles;
+        const repairResult = repairProjectFiles(updatedFiles);
+        project.files = Object.fromEntries(
+            Object.entries(repairResult.files).map(([path, content]) => [path, {
+                content,
+                hash: cryptoHash(content),
+            }]),
+        );
         project.markModified("files");
-        project.version += 1;
+        project.version = (project.version || 0) + 1;
         project.status = "completed";
         project.messages.push({
             role: "assistant",
             content: result.description + (errors.length > 0
-                ? `\n\nSome operations failed: ${errors.join(", ")}`
+                ? "\n\nSome operations failed: " + errors.join(", ")
                 : ""),
         });
 
         await project.save();
 
-        const filesObj = {};
-        for (const [path, entry] of Object.entries(project.files)) {
-            filesObj[path] = entry.content;
-        }
+        const files = Object.fromEntries(
+            Object.entries(project.files).map(([path, entry]) => [
+                path,
+                typeof entry?.content === "string" ? entry.content : "",
+            ]),
+        );
 
         res.json({
             _id: project._id,
             name: project.name,
             description: project.description,
-            files: filesObj,
+            files,
             messages: project.messages,
             version: project.version,
             status: project.status,
-            applied: applied || [],
-            errors: errors || [],
-            aiDescription: result?.description || "",
-       
+            applied,
+            errors,
+            aiDescription: result.description || "",
         });
-
-
-
-
     } catch (error) {
-        console.error(`[AI Revision Error] ${error.message}`);
-        project.status = "completed";
+        console.error("[AI Revision Error] " + error.message);
+        project.status = "failed";
+        project.error = error.message || "Failed to process revision request";
         await project.save();
         res.status(500).json({
-            error: error.message || "Failed to process revision request"
+            error: error.message || "Failed to process revision request",
         });
-
     }
-
 }

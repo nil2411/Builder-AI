@@ -1,4 +1,3 @@
-import React from 'react'
 import bgImg from '../public/bg-img.png'
 import logo from '../public/logo.svg'
 

@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SandpackProvider, useSandpack, SandpackLayout, SandpackCodeEditor, SandpackPreview } from '@codesandbox/sandpack-react'
-import { detectDependencies } from '../utils/sandpackUtils';
+import { createSandpackFiles, detectDependencies, getPreviewEntry, normalizePreviewCode, SANDPACK_BUNDLER_URL } from '../utils/sandpackUtils';
 import { useAppContext } from '../context/AppContext';
 import SandpackErrorMonitor from './SandpackErrorMonitor';
 
@@ -16,10 +16,17 @@ function SandpackFileWatcher({ onLiveFilesChange }) {
     const { activeprojects: activeProject, updateProjectFiles } = useAppContext();
 
     const activeProjectRef = useRef(activeProject);
+    const updateProjectFilesRef = useRef(updateProjectFiles);
+    const onLiveFilesChangeRef = useRef(onLiveFilesChange);
+    const hasHydratedRef = useRef(false);
 
+    // Keep the latest values available without making the Sandpack file watcher
+    // re-run merely because the parent context produced a new callback/object.
     useEffect(() => {
         activeProjectRef.current = activeProject;
-    }, [activeProject])
+        updateProjectFilesRef.current = updateProjectFiles;
+        onLiveFilesChangeRef.current = onLiveFilesChange;
+    }, [activeProject, updateProjectFiles, onLiveFilesChange]);
 
     useEffect(() => {
         const project = activeProjectRef.current;
@@ -28,63 +35,72 @@ function SandpackFileWatcher({ onLiveFilesChange }) {
         let hasChanges = false;
 
         for (const [path, fileObj] of Object.entries(files || {})) {
+            // Sandpack injects its own preview document and template files. Only
+            // persist files that already belong to the generated project.
+            if (path === "/public/index.html" || project.files?.[path] === undefined) {
+                continue;
+            }
+
             const fileCode = fileObj?.code ?? "";
             updatedFiles[path] = fileCode;
-            if (project.files?.[path] !== undefined && getFileCode(project.files[path]) !== fileCode) {
+            const storedCode = normalizePreviewCode(project.files?.[path], path);
+            const hydratedCode = normalizePreviewCode(fileCode, path);
+            // Sandpack trims/normalizes source during hydration. Compare the
+            // canonical text so preview boot does not look like a user edit.
+            if (storedCode !== hydratedCode) {
                 hasChanges = true;
             }
         }
 
-        onLiveFilesChange(updatedFiles);
-        if (hasChanges) {
-            updateProjectFiles(updatedFiles);
+        onLiveFilesChangeRef.current(updatedFiles);
+        // The first files event is Sandpack hydration, never a user edit.
+        if (!hasHydratedRef.current) {
+            hasHydratedRef.current = true;
+            return;
         }
-    }, [files, onLiveFilesChange, updateProjectFiles])
+        if (hasChanges) {
+            updateProjectFilesRef.current(updatedFiles);
+        }
+    }, [files])
 
     return null;
 }
 
 const PreviewPanel = ({ project, activeFile, showCode }) => {
     const [showErrorOverlay, setShowErrorOverlay] = useState(true);
-    const [liveFiles, setLiveFiles] = useState(project.files);
-    const [prevProjectKey, setPrevProjectKey] = useState(`${project._id}-${project.version}`);
+    const initialProjectKey = `${project._id}-${project.version}`;
+    const [liveFilesState, setLiveFilesState] = useState({
+        key: initialProjectKey,
+        files: project.files,
+    });
 
     const currentKey = `${project._id}-${project.version}`;
-
-    if (prevProjectKey !== currentKey) {
-        setPrevProjectKey(currentKey);
-        setLiveFiles(project.files);
-    }
+    const previewFiles = liveFilesState.key === currentKey ? liveFilesState.files : project.files;
 
     const handleLiveFilesChange = useCallback((newFiles) => {
-        setLiveFiles((prev) => {
-            const prevFiles = prev || {};
+        setLiveFilesState((previous) => {
+            const previousFiles = previous.key === currentKey ? previous.files : project.files;
             let changed = false;
             for (const [p, code] of Object.entries(newFiles)) {
-                if (getFileCode(prevFiles[p]) !== code) {
+                if (getFileCode(previousFiles?.[p]).trim() !== String(code ?? "").trim()) {
                     changed = true;
                     break;
                 }
             }
-            return changed ? newFiles : prev
-        })
-    }, [])
+            return changed ? { key: currentKey, files: newFiles } : previous;
+        });
+    }, [currentKey, project.files])
 
-    const sandpackFiles = useMemo(() => {
-        const spFiles = {};
-
-        for (const [path, content] of Object.entries(liveFiles || {})) {
-            spFiles[path] = {
-                code: getFileCode(content),
-                active: path === activeFile
-            }
-        }
-        return spFiles;
-    }, [liveFiles, activeFile])
+    const sandpackFiles = useMemo(
+        () => createSandpackFiles(previewFiles, activeFile),
+        [previewFiles, activeFile],
+    );
 
     const dependencies = useMemo(() => {
-        return detectDependencies(liveFiles)
-    }, [liveFiles])
+        return detectDependencies(previewFiles)
+    }, [previewFiles])
+
+    const previewEntry = useMemo(() => getPreviewEntry(previewFiles), [previewFiles]);
 
     return (
         <div className='w-full h-full'>
@@ -92,12 +108,10 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
                 key={currentKey}
                 template='react'
                 files={sandpackFiles}
-                customSetup={{ dependencies }}
+                customSetup={{ dependencies, entry: previewEntry }}
                 options={{
-                    externalResources: [
-                        "https://cdn.tailwindcss.com",
-                        "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css",
-                    ],
+                    bundlerURL: SANDPACK_BUNDLER_URL,
+
                     classes: {
                         "sp-wrapper": "sp-wrapper",
                         "sp-layout": "sp-layout",

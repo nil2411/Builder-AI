@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "eval:generation": "node evals/generationEval.js"
   },
   "keywords": [],
   "author": "",
@@ -13,6 +14,7 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/openai": "^4.0.81",
+    "@babel/parser": "^7.29.9",
     "ai": "^7.0.122",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",

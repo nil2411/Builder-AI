@@ -1,115 +1,134 @@
-import { createContext, useCallback, useContext, useEffect, useState,useMemo } from "react";
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import api from "../api/api";
 import toast from "react-hot-toast";
-import { Navigate, useNavigate } from "react-router-dom";
-import debounce from 'lodash.debounce'
+import { useNavigate } from "react-router-dom";
+import debounce from "lodash.debounce";
 
 const AppContext = createContext(undefined);
 
-//Auth states
+function normalizeProject(project) {
+    if (!project) return null;
 
+    const normalized = {
+        ...project,
+        _id: project._id ?? project.id,
+        files: project.files ?? {},
+        messages: project.messages ?? [],
+    };
 
+    if (project.status != null) {
+        normalized.status = String(project.status).toLowerCase();
+    }
+
+return normalized;
+}
+
+function hasVisibleProjectChange(previous, next) {
+    if (!previous) return true;
+
+    const previousFiles = Object.keys(previous.files ?? {});
+    const nextFiles = Object.keys(next.files ?? {});
+    const previousGenerated = previous.filesGenerated ?? [];
+    const nextGenerated = next.filesGenerated ?? [];
+
+    return (
+        previous.status !== next.status ||
+        previous.version !== next.version ||
+        previous.currentFile !== next.currentFile ||
+        previous.error !== next.error ||
+        previousFiles.length !== nextFiles.length ||
+        previous.filesPlanned?.length !== next.filesPlanned?.length ||
+        previousGenerated.length !== nextGenerated.length ||
+        previousGenerated.some((path, index) => path !== nextGenerated[index]) ||
+        previous.messages?.length !== next.messages?.length
+    );
+}
 
 export function AppContextProvider({ children }) {
-    //Auth states
-    const [user, setuser] = useState(null);
-    const [loadingUSer, setloadingUser] = useState(true);
-    const navigate = useNavigate();
+    const [user, setUser] = useState(null);
+    const [loadingUser, setLoadingUser] = useState(true);
     const [projects, setProjects] = useState([]);
-    const [loadingprojects, setLoadingProjects] = useState(true);
-    const [activeprojects, setActiveProjects] = useState(null);
-    const [loadingactiveprojects, setLoadingActiveProjects] = useState(true);
-    const [chatloading, setChatLoading] = useState(false);
+    const [loadingProjects, setLoadingProjects] = useState(true);
+    const [activeProject, setActiveProject] = useState(null);
+    const [loadingActiveProject, setLoadingActiveProject] = useState(true);
+    const [chatLoading, setChatLoading] = useState(false);
     const [generatingProject, setGeneratingProject] = useState(false);
+    const [retryingProject, setRetryingProject] = useState(false);
     const [activeFile, setActiveFile] = useState("/App.js");
-    const [showcode, setShowCode] = useState(false);
+    const [showCode, setShowCode] = useState(false);
+    const navigate = useNavigate();
 
-
-    //Auth Actions
-    const checksession = async () => {
+    const checkSession = useCallback(async () => {
         try {
-
             const { data } = await api.get("/api/auth/me");
-            setuser(data.user);
-
-        } catch (error) {
-            setuser(null);
-
+            setUser(data.user);
+        } catch {
+            setUser(null);
+        } finally {
+            setLoadingUser(false);
         }
-        finally {
-            setloadingUser(false);
-        }
-    }
+    }, []);
 
     useEffect(() => {
-        checksession();
-    }, [])
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        checkSession();
+    }, [checkSession]);
 
-    const login = async (email, password) => {
+    const login = useCallback(async (email, password) => {
         try {
             const { data } = await api.post("/api/auth/login", { email, password });
-            setuser(data.user);
-            toast.success("welcome back !");
-            navigate('/');
-
+            setUser(data.user);
+            toast.success("Welcome back!");
+            navigate("/");
         } catch (error) {
-            console.log(error);
-
-            const errmsg = error?.response?.data?.error || "Invalid email or password";
-            toast.error(errmsg);
-            throw new Error(errmsg);
-
-
+            const message = error?.response?.data?.error || "Invalid email or password";
+            toast.error(message);
+            throw new Error(message, { cause: error });
         }
-    }
-    const register = async (name, email, password) => {
+    }, [navigate]);
+
+    const register = useCallback(async (name, email, password) => {
         try {
             const { data } = await api.post("/api/auth/register", { name, email, password });
-            setuser(data.user);
-            toast.success("Account Created Successfully!");
-            navigate('/');
-
+            setUser(data.user);
+            toast.success("Account created successfully!");
+            navigate("/");
         } catch (error) {
-            console.log("Registraton failed : ", error);
-
-            const errmsg = error?.response?.data?.error || "Registration failed ";
-            toast.error(errmsg);
-            throw new Error(errmsg);
-
-
+            const message = error?.response?.data?.error || "Registration failed";
+            toast.error(message);
+            throw new Error(message, { cause: error });
         }
-    }
+    }, [navigate]);
 
-    const logout = async () => {
+    const logout = useCallback(async () => {
         try {
             await api.post("/api/auth/logout");
-            setuser(null);
+        } catch (error) {
+            console.error("Logout failed:", error);
+        } finally {
+            setUser(null);
             setProjects([]);
-            setActiveProjects(null);
-            toast.success("logged out successfully")
-            navigate('/login')
-
-        } catch (err) {
-            console.log("logout failed:", err);
-            toast.error("Logout Failed !");
-
-
+            setActiveProject(null);
+            toast.success("Logged out successfully");
+            navigate("/login");
         }
-    }
+    }, [navigate]);
 
-    const loadprojects = useCallback(async () => {
+    const loadProjects = useCallback(async () => {
         if (!user) {
             setProjects([]);
             setLoadingProjects(false);
             return;
         }
 
+        setLoadingProjects(true);
         try {
             const { data } = await api.get("/api/projects");
-            setProjects(Array.isArray(data) ? data : []);
+            setProjects(Array.isArray(data) ? data.map(normalizeProject) : []);
         } catch (error) {
-            console.error("Failed to list projects : ", error);
-            toast.error("Failed to load Projects list!");
+            console.error("Failed to list projects:", error);
+            toast.error(error?.response?.data?.error || "Failed to load projects");
             setProjects([]);
         } finally {
             setLoadingProjects(false);
@@ -117,237 +136,241 @@ export function AppContextProvider({ children }) {
     }, [user]);
 
     const loadProject = useCallback(async (id, silent = false) => {
-        if (!user) {
-            if (!silent) setLoadingActiveProjects(false);
+        if (!user || !id) {
+            if (!silent) setLoadingActiveProject(false);
             return;
         }
 
-        if (!silent) setLoadingActiveProjects(true);
+        if (!silent) setLoadingActiveProject(true);
+
         try {
+            const { data } = await api.get("/api/projects/" + id);
+            const project = normalizeProject(data);
 
-            const { data } = await api.get(`/api/projects/${id}`);
-            setActiveProjects((prev) => {
-                if (prev && prev.status === data.status && prev.version === data.version) {
-                    return prev;
-                }
-                return data;
-            });
+            setActiveProject((previous) => (
+                hasVisibleProjectChange(previous, project) ? project : previous
+            ));
 
-
-            //Default file selection
-
-            const files = Object.keys(data.files);
+            const files = Object.keys(project.files);
             if (files.length > 0) {
-                setActiveFile((prev) => {
-                    if (files.includes(prev)) return prev;
-                    if (files.includes("/App.js")) return "/App.js";
-                    return files[0];
-
-
-                })
+                setActiveFile((previous) => {
+                    if (files.includes(previous)) return previous;
+                    return files.includes("/App.js") ? "/App.js" : files[0];
+                });
             }
-
         } catch (error) {
-            console.error("Failed to load project", error);
+            console.error("Failed to load project:", error);
             if (!silent) {
-                toast.error("Failed to load project details !");
+                toast.error(error?.response?.data?.error || "Failed to load project");
                 navigate("/");
-
             }
-
-
+        } finally {
+            if (!silent) setLoadingActiveProject(false);
         }
-        finally {
-            if (!silent) setLoadingActiveProjects(false);
-
-
-        }
-
-
-    }, [user, navigate]);
-
-    //Automatically poll active project status if generating or pending;
+    }, [navigate, user]);
 
     useEffect(() => {
-        if (!activeprojects?._id || !user) return;
+        if (!activeProject?._id || !user) return undefined;
 
-        const ongoing = activeprojects.status === "Generating" || activeprojects.status === "Pending" || activeprojects.status === "Revising";
+        const status = (activeProject.status || "").toLowerCase();
+        const ongoing = ["pending", "generating", "revising"].includes(status);
 
-        if (ongoing) {
-            setChatLoading(true);
-            const interval = setInterval(() => {
-                loadProject(activeprojects._id, true);
-            }, 2000);
-            return () => clearInterval(interval);
-        }
-        else {
+        if (!ongoing) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setChatLoading(false);
+            return undefined;
         }
 
-    }, [activeprojects?._id, activeprojects?.status, loadProject, user]);
+        setChatLoading(true);
+        const interval = setInterval(() => {
+            loadProject(activeProject._id, true);
+        }, 2000);
+
+        return () => clearInterval(interval);
+    }, [activeProject?._id, activeProject?.status, loadProject, user]);
 
     const handleGenerate = useCallback(async (prompt) => {
-        if (!user) return;
-        setGeneratingProject(true);
-
-        try {
-            const { data } = await api.get("/api/projects", { prompt });
-            toast.success("AI agent is planning structure...");
-            navigate(`/builder/${data._id}`);
-
-
-        } catch (error) {
-            console.error("Failed to generate project", error);
-            toast.error(error?.response?.data?.error || "Failed to generate projects !");
-
-
+        if (!user) {
+            toast.error("Sign in to create a project");
+            navigate("/login");
+            return;
         }
-        finally {
+
+        const trimmedPrompt = typeof prompt === "string" ? prompt.trim() : "";
+        if (!trimmedPrompt) {
+            toast.error("Describe the project you want to build");
+            return;
+        }
+
+        setGeneratingProject(true);
+        try {
+            const { data } = await api.post("/api/projects", { prompt: trimmedPrompt });
+            const projectId = data?._id ?? data?.id;
+
+            if (!projectId) {
+                throw new Error("The server did not return a project id");
+            }
+
+            setProjects((previous) => [
+                normalizeProject({ ...data, _id: projectId }),
+                ...previous.filter((project) => project._id !== projectId),
+            ]);
+            toast.success("AI agent is planning the project...");
+            navigate("/builder/" + projectId);
+        } catch (error) {
+            console.error("Failed to generate project:", error);
+            toast.error(error?.response?.data?.error || error.message || "Failed to generate project");
+        } finally {
             setGeneratingProject(false);
         }
+    }, [navigate, user]);
 
+    const handleRetry = useCallback(async () => {
+        if (!activeProject?._id || !user || (activeProject.status || "").toLowerCase() !== "failed") return;
 
+        setRetryingProject(true);
+        try {
+            const { data } = await api.post("/api/projects/" + activeProject._id + "/retry");
+            const project = normalizeProject(data);
 
-    }, [NavigateEvent, user]);
-
-
+            setActiveProject(project);
+            setActiveFile("/App.js");
+            setShowCode(false);
+            setProjects((previous) => previous.map((item) => (
+                item._id === project._id
+                    ? { ...item, name: project.name, version: project.version, updatedAt: project.updatedAt }
+                    : item
+            )));
+            toast.success("Retry started. The AI agent is planning the project...");
+        } catch (error) {
+            console.error("Failed to retry project generation:", error);
+            toast.error(error?.response?.data?.error || "Could not retry project generation");
+        } finally {
+            setRetryingProject(false);
+        }
+    }, [activeProject, user]);
     const handleDelete = useCallback(async (id) => {
-        if (!user) return;
-
+        if (!user || !id) return;
 
         try {
-            await api.delete(`/api/projects/${id}`);
-
-            setProjects((prev) => prev.filter((p) => p._id !== id));
-
+            await api.delete("/api/projects/" + id);
+            setProjects((previous) => previous.filter((project) => project._id !== id));
+            if (activeProject?._id === id) {
+                setActiveProject(null);
+            }
             toast.success("Project deleted successfully");
-
-
-
-
-
         } catch (error) {
-            console.error("Failed to delete project", error);
-            toast.error(error?.response?.data?.error || "Failed to delete project!");
-
-
-
+            console.error("Failed to delete project:", error);
+            toast.error(error?.response?.data?.error || "Failed to delete project");
         }
+    }, [activeProject, user]);
 
+    const handleChat = useCallback(async (prompt) => {
+        if (!activeProject?._id || !user) return;
 
+        const trimmedPrompt = typeof prompt === "string" ? prompt.trim() : "";
+        if (!trimmedPrompt) return;
 
+        setChatLoading(true);
+        try {
+            const { data } = await api.post(
+                "/api/projects/" + activeProject._id + "/chat",
+                { prompt: trimmedPrompt },
+            );
+            const project = normalizeProject(data);
+            setActiveProject(project);
+            setProjects((previous) => previous.map((item) => (
+                item._id === project._id
+                    ? { ...item, name: project.name, version: project.version, updatedAt: project.updatedAt }
+                    : item
+            )));
 
-    }, [user]);
-
-    const handleChat = useCallback(
-        async(prompt) =>{
-            if(!activeprojects || !user) return;
-            
-            setChatLoading(true);
-
-            try {
-                const {data} = await api.post(`/api/projects/${activeprojects._id}/chat`,{prompt});
-
-                setActiveProjects(data);
-
-                if(data.errors && data.errors.length > 0){
-                    toast.error(`${data.erros.length} revision  patch(es) failed`);
-
-
-                }
-                else{
-                    toast.success(`updated to version ${data.version}`);
-                }
-            } catch (error) {
-
-                console.error("Revision request failed : ",error);
-
-                
+            if (project.errors?.length > 0) {
+                toast.error(project.errors.length + " revision patch(es) failed");
+            } else {
+                toast.success("Updated to version " + project.version);
             }
-            finally{
-                setChatLoading(false);
-            }
-
-        },[activeprojects,user]
-    )
+        } catch (error) {
+            console.error("Revision request failed:", error);
+            toast.error(error?.response?.data?.error || "Revision request failed");
+        } finally {
+            setChatLoading(false);
+        }
+    }, [activeProject, user]);
 
     const debouncedSave = useMemo(
-        () => debounce(async(files,id) =>{
+        () => debounce(async (files, id) => {
             try {
-                await api.put(`/api/projects/${id}/files`,{files});
-                
+                const { data } = await api.put("/api/projects/" + id + "/files", { files });
+                const savedProject = normalizeProject(data);
+                setActiveProject((previous) => {
+                    if (!previous) return previous;
+                    const nextProject = {
+                        ...previous,
+                        ...savedProject,
+                        _id: previous._id,
+                    };
+                    // A no-op PUT must not create a new active-project object.
+                    // This prevents the preview watcher from treating its own
+                    // response as another file-change event.
+                    return hasVisibleProjectChange(previous, nextProject) ? nextProject : previous;
+                });
             } catch (error) {
-                console.error("failed to auto-save files", error);
-                toast.error("Failed to save code modificatons");
-                
-                
+                console.error("Failed to auto-save files:", error);
+                toast.error(error?.response?.data?.error || "Failed to save code changes");
             }
+        }, 1000),
+        [],
+    );
 
-        },1000),[],
-    )
+    useEffect(() => () => {
+        debouncedSave.flush();
+        debouncedSave.cancel();
+    }, [debouncedSave]);
 
-    useEffect(() => {
-        return() =>{
-            debouncedSave.flush();
-        }
-    },[debouncedSave])
-
-    const updateProjectFiles = useCallback(
-        async(files) =>{
-            if(!activeprojects || !user)return;
-
-            debouncedSave(files, activeprojects._id);
-
-
-
-        },[activeprojects,user,debouncedSave]
-    )
-
+    const updateProjectFiles = useCallback((files) => {
+        if (!activeProject?._id || !user) return;
+        debouncedSave(files, activeProject._id);
+    }, [activeProject, debouncedSave, user]);
 
     return (
         <AppContext.Provider value={{
             user,
-            loadingUSer,
+            loadingUSer: loadingUser,
             login,
             register,
             logout,
             projects,
-            loadingprojects,
-            activeprojects,
-            loadingactiveprojects,
-            chatloading,
+            loadingprojects: loadingProjects,
+            activeprojects: activeProject,
+            loadingactiveprojects: loadingActiveProject,
+            chatloading: chatLoading,
             generatingProject,
+            retryingProject,
             activeFile,
-            showcode,
+            showcode: showCode,
             setActiveFile,
             setShowCode,
             loadProject,
-            loadprojects,
+            loadprojects: loadProjects,
             handleGenerate,
+            handleRetry,
             handleDelete,
             setProjects,
             handleChat,
-            updateProjectFiles
-           
+            updateProjectFiles,
         }}>
-
-
-
-
-
             {children}
-
         </AppContext.Provider>
-    )
+    );
 }
 
 export function useAppContext() {
     const context = useContext(AppContext);
 
     if (context === undefined) {
-        throw new Error("useAppContext must be use within an AppContextProvider");
+        throw new Error("useAppContext must be used within an AppContextProvider");
     }
 
     return context;
-
 }

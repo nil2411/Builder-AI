@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 import { useParams } from 'react-router-dom'
 import Loading from '../Component/Loading';
 import { AlertCircleIcon } from "lucide-react"
@@ -9,16 +9,11 @@ const Previewpage = () => {
 
   const { id } = useParams();
   const [project, setProject] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(Boolean(id));
+  const [error, setError] = useState(id ? "" : "This preview is not available.");
 
   useEffect(() => {
-    if (!id) {
-      setError("This preview is not available.");
-      setProject(null);
-      setLoading(false);
-      return;
-    }
+    if (!id) return;
 
     let cancelled = false;
 

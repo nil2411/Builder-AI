@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
     createProject, deleteProject, getProject, getPublicProject,
-    listProjects, publishProject, updateProjectFiles
+    listProjects, publishProject, retryProject, updateProjectFiles
 } from "../controllers/ProjectController.js";
 import { authMiddleware } from "../middleware/authMiddleware.js";
 import { chat } from "../controllers/ChatController.js";
@@ -20,7 +20,8 @@ projectRouter.get("/:id", getProject)
 projectRouter.delete("/:id", deleteProject)
 projectRouter.put("/:id/files", updateProjectFiles)
 projectRouter.post("/:id/publish", publishProject)
+projectRouter.post("/:id/retry", retryProject)
 
-projectRouter.post("/ : id/chat", chat);
+projectRouter.post("/:id/chat", chat);
 
 export default projectRouter;
