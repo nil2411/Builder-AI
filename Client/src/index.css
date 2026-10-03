@@ -57,6 +57,8 @@ body {
   border-radius: 0 !important;
   background: transparent !important;
   height: 100% !important;
+  width: 100% !important;
+  min-width: 0 !important;
 }
 
 .sp-preview {
@@ -69,6 +71,22 @@ body {
 
 .sp-code-editor {
   height: 100% !important;
+}
+
+.builder-sandpack-layout > * {
+  min-width: 0 !important;
+}
+
+@media (max-width: 767px) {
+  .sp-layout {
+    flex-direction: column !important;
+  }
+
+  .sp-code-editor,
+  .sp-preview {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
 }
 
 /* Marquee styles */

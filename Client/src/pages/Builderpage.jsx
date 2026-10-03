@@ -17,6 +17,7 @@ const Builderpage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [leftTab, setLeftTab] = useState('chat');
+  const [mobileView, setMobileView] = useState('workspace');
   const [publishing, setPublishing] = useState(false);
   const [publishUrl, setPublishUrl] = useState(null);
 
@@ -108,9 +109,33 @@ const Builderpage = () => {
 
 
       {/* Main layout */}
-      <div className='flex-1 flex overflow-hidden'>
+      <div className='flex-1 min-h-0 flex flex-col overflow-hidden'>
+        <div className="flex md:hidden shrink-0 border-b border-zinc-200 bg-white p-1.5">
+          <button
+            type="button"
+            onClick={() => setMobileView("workspace")}
+            className={mobileView === "workspace"
+              ? "flex-1 rounded-md bg-zinc-900 px-3 py-2 text-xs font-medium text-white"
+              : "flex-1 rounded-md px-3 py-2 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"}
+          >
+            Workspace
+          </button>
+          <button
+            type="button"
+            onClick={() => setMobileView("preview")}
+            className={mobileView === "preview"
+              ? "flex-1 rounded-md bg-zinc-900 px-3 py-2 text-xs font-medium text-white"
+              : "flex-1 rounded-md px-3 py-2 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"}
+          >
+            Preview
+          </button>
+        </div>
+
+        <div className='flex-1 min-h-0 flex overflow-hidden'>
         {/* Left sidebar */}
-        <div className='w-[320px] shrink-0 flex flex-col border-r border-zinc-200 bg-white'>
+        <div className={mobileView === "workspace"
+          ? "flex md:flex w-full md:w-[320px] md:shrink-0 min-w-0 min-h-0 flex-col border-r border-zinc-200 bg-white"
+          : "hidden md:flex w-full md:w-[320px] md:shrink-0 min-w-0 min-h-0 flex-col border-r border-zinc-200 bg-white"}>
           {/* sidebar tabs */}
 
           <div className="flex border-b border-zinc-100">
@@ -161,7 +186,9 @@ const Builderpage = () => {
 
         {/* /preview / code Area */}
 
-        <div className='flex-1 overflow-hidden'>
+        <div className={mobileView === "preview"
+          ? "flex md:flex flex-1 min-w-0 min-h-0 overflow-hidden"
+          : "hidden md:flex flex-1 min-w-0 min-h-0 overflow-hidden"}>
           {["pending", "generating", "failed"].includes((activeProject.status || "").toLowerCase()) ? (
             <AgentProgressDashboard project={activeProject} onRetry={handleRetry} retrying={retryingProject} />
           ):(
@@ -170,6 +197,7 @@ const Builderpage = () => {
 
         </div>
 
+        </div>
       </div>
 
       {publishUrl && <PublishModal publishurl={publishUrl} onclose={() => setPublishUrl(null)}/>}

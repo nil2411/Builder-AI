@@ -103,7 +103,7 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
     const previewEntry = useMemo(() => getPreviewEntry(previewFiles), [previewFiles]);
 
     return (
-        <div className='w-full h-full'>
+        <div className='w-full h-full min-w-0 min-h-0 overflow-hidden'>
             <SandpackProvider
                 key={currentKey}
                 template='react'
@@ -143,8 +143,11 @@ const PreviewPanel = ({ project, activeFile, showCode }) => {
                 <SandpackFileWatcher onLiveFilesChange={handleLiveFilesChange} />
                 <SandpackErrorMonitor onErrorChange={setShowErrorOverlay} />
                 <SandpackLayout
+                    className="builder-sandpack-layout"
                     style={{
                         height: "100%",
+                        width: "100%",
+                        minWidth: 0,
                         border: "none",
                         borderRadius: 0,
                         background: "transparent"
