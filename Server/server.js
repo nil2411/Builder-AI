@@ -8,9 +8,14 @@ import projectRouter from "./Routes/ProjectRoutes.js";
 
 const app = express();
 
-const configuredOrigins = (process.env.ORIGINS ?? process.env.ORIGIN ?? "")
-    .split(",")
-    .map((origin) => origin.trim())
+const configuredOrigins = [
+    process.env.ORIGINS,
+    process.env.ORIGIN,
+    process.env.FRONTEND_URL,
+]
+    .filter(Boolean)
+    .flatMap((origins) => origins.split(","))
+    .map((origin) => origin.trim().replace(/\/$/, ""))
     .filter(Boolean);
 
 const localOrigins = process.env.NODE_ENV === "production"
@@ -22,12 +27,21 @@ const localOrigins = process.env.NODE_ENV === "production"
         "http://127.0.0.1:3000",
     ];
 
-const allowedOrigins = [...new Set([...configuredOrigins, ...localOrigins])];
+// Keep the deployed frontend available even if ORIGINS was not added to Vercel
+// yet. Additional preview/custom frontend URLs should still be configured via
+// ORIGINS or FRONTEND_URL instead of allowing every *.vercel.app origin.
+const deployedFrontendOrigin = "https://builder-ai-rouge.vercel.app";
+const allowedOrigins = new Set([
+    ...configuredOrigins,
+    ...localOrigins,
+    deployedFrontendOrigin,
+]);
 
 const corsOptions = {
     credentials: true,
     origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
+        const normalizedOrigin = origin?.replace(/\/$/, "");
+        if (!normalizedOrigin || allowedOrigins.has(normalizedOrigin)) {
             callback(null, true);
             return;
         }
@@ -36,13 +50,24 @@ const corsOptions = {
     },
 };
 
-await connectDB();
-
+// CORS must run before database initialization so browser preflight requests
+// receive the required headers even when MongoDB is unavailable or slow.
 app.use(cors(corsOptions));
 app.use(cookieParser());
 app.use(express.json({ limit: "10mb" }));
 
 app.get("/", (_req, res) => res.send("server is live!"));
+
+// Vercel keeps the Express app warm between requests, so connect lazily and
+// reuse Mongoose's connection rather than blocking module initialization.
+app.use("/api", async (_req, _res, next) => {
+    try {
+        await connectDB();
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
 
 app.use("/api/auth", authRouter);
 app.use("/api/projects", projectRouter);
@@ -70,11 +95,15 @@ app.use((err, _req, res, next) => {
     });
 });
 
+export default app;
+
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("PORT must be an integer between 1 and 65535");
 }
 
-app.listen(port, () => {
-    console.log("Server is running at http://localhost:" + port);
-});
+if (!process.env.VERCEL) {
+    app.listen(port, () => {
+        console.log("Server is running at http://localhost:" + port);
+    });
+}
